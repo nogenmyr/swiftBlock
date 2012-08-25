@@ -2,7 +2,7 @@ bl_info = {
     "name": "SwiftBlock",
     "author": "Karl-Johan Nogenmyr",
     "version": (0, 1),
-    "blender": (2, 6, 3),
+    "blender": (2, 6, 2),  # PLEASE NOTE: There is a bug in in version 2.63 which affects the shortest path code! If you really want 2.63, find a daily build version.
     "api": 35622,
     "location": "Tool Shelf",
     "description": "Writes block geometry as blockMeshDict file",
@@ -17,7 +17,27 @@ bl_info = {
 #----------------------------------------------------------
 import bpy
 from bpy.props import *
- 
+
+def sortedVertices(verts,edges,startVert):
+    sorted = []
+    sorted.append(startVert)
+    vert = startVert
+    length = len(edges)+1
+    while len(sorted) < length:
+        for eid, e in enumerate(edges):
+            if vert in e:
+                if e[0] == vert:
+                    sorted.append(e[1])
+                else:
+                    sorted.append(e[0])
+                edges.pop(eid)
+                vert = sorted[-1]
+                break
+    polyLine = ''
+    for v in sorted:
+        polyLine += '({} {} {})'.format(*verts[v])
+    return polyLine
+
 def patchColor(patch_no):
     color = [(1.0,0.,0.), (0.0,1.,0.),(0.0,0.,1.),(0.707,0.707,0),(0,0.707,0.707),(0.707,0,0.707)]
     return color[patch_no % len(color)]
@@ -381,6 +401,12 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
             )
 
     def invoke(self, context, event):
+        if context.scene.setEdges:
+            try:
+                bpy.data.objects[context.scene.geoobjName]
+            except:
+                self.report({'INFO'}, "Cannot find object for edges!")        
+                return{'CANCELLED'}
         self.filepath = 'blockMeshDict'
         bpy.context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
@@ -396,8 +422,8 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
         patchtypes = list()
         patchverts = list()
         patches = list()
-        
-        bpy.ops.object.mode_set(mode='OBJECT')
+
+        bpy.ops.object.mode_set(mode='OBJECT')   # Refresh mesh object
         bpy.ops.object.mode_set(mode='EDIT')
         for mid, m in enumerate(obj.data.materials):
             bpy.ops.mesh.select_all(action='DESELECT')
@@ -405,10 +431,10 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
             bpy.ops.object.material_slot_select()
             bpy.ops.object.mode_set(mode='OBJECT')
             bpy.ops.object.mode_set(mode='EDIT')
-            try:
-                faces = obj.data.polygons
+            try: 
+                faces = obj.data.polygons  # Blender 2.63+
             except:
-                faces = obj.data.faces
+                faces = obj.data.faces  # Blender 2.62-
             for f in faces:
                 if f.select and f.material_index == mid:
                     if m.name in patchnames:
@@ -441,19 +467,15 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
                 grad = obj['creaseToGradMap'][str(round(e.crease*100))]
             gradedEdges.append([[e.vertices[0],e.vertices[1]], grad])
 
+        bpy.ops.object.mode_set(mode='OBJECT')
+        polyLines = ''
+        
         if scn.setEdges:
+            bpy.ops.wm.context_set_value(data_path="tool_settings.mesh_select_mode", value="(True,False,False)")
             geoobj = bpy.data.objects[scn.geoobjName]
             geo_verts = list(blender_utils.vertices_from_mesh(geoobj))
             geo_edges = list(blender_utils.edges_from_mesh(geoobj))
-        else:
-            geo_verts = list()
-            geo_edges = list()
-
-
-        bpy.ops.object.mode_set(mode='OBJECT')
-        bpy.context.scene.objects.active=bpy.data.objects[scn.geoobjName]
-        
-        if scn.setEdges:
+            bpy.context.scene.objects.active=bpy.data.objects[scn.geoobjName]
             geoobj = bpy.data.objects[scn.geoobjName]
             snapped_verts = {}
             for vid, v in enumerate(verts):
@@ -464,6 +486,7 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
                         break
             for ed in edges:
                 if ed[0] in snapped_verts and ed[1] in snapped_verts:
+                    geoobj.hide = False
                     bpy.ops.object.mode_set(mode='EDIT')
                     bpy.ops.mesh.select_all(action='DESELECT')
                     bpy.ops.object.mode_set(mode='OBJECT')
@@ -472,9 +495,9 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
                     bpy.ops.object.mode_set(mode='EDIT')
                     bpy.ops.mesh.select_vertex_path(type='EDGE_LENGTH')
 
-                    bpy.ops.object.mode_set(mode='OBJEC')
+                    bpy.ops.object.mode_set(mode='OBJECT')
                     bpy.ops.object.mode_set(mode='EDIT')
-                    bpy.ops.mesh.duplicate(1)
+                    bpy.ops.mesh.duplicate()
                     bpy.ops.object.mode_set(mode='OBJECT')
                     bpy.ops.object.mode_set(mode='EDIT')
                     bpy.ops.mesh.separate(type='SELECTED')
@@ -482,25 +505,24 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
                     polyLineobj = bpy.data.objects[scn.geoobjName+'.001']
                     polyLineverts = list(blender_utils.vertices_from_mesh(polyLineobj))
                     polyLineedges = list(blender_utils.edges_from_mesh(polyLineobj))
+                    for vid, v in enumerate(polyLineverts):
+                        mag = (v-verts[ed[0]]).magnitude
+                        if mag < 1e-6:
+                            startVertex = vid
+                            break
                     polyLine = 'polyLine {} {} ('.format(*ed)
-                    for v in polyLineverts:
-                        polyLine += '({} {} {})'.format(*v)
+                    polyLine += sortedVertices(polyLineverts,polyLineedges,startVertex)
                     polyLine += ')\n'
                     print(polyLine)
+                    polyLines += polyLine
                     geoobj.select = False
                     obj.select = False
                     polyLineobj.select = True
                     bpy.ops.object.delete()
+        obj.select = True
+        bpy.context.scene.objects.active = obj
 
-#
-# finn snapped, lägg i dict
-# gå igenom edges och finn de som båda är snappade
-# markera snappade och finn shortest path
-# dplicera
-# separate selection
-# finn nyskapat object
-# chansa på att man enkelt kan ta vertex 0 till n som en polyLine... om inte, leta igenom edges
-        utils.write(self.filepath, edges, verts, scn.resFloat/scn.ctmFloat, scn.ctmFloat, patches, geo_edges, geo_verts, forcedEdges, gradedEdges)
+        utils.write(self.filepath, edges, verts, scn.resFloat/scn.ctmFloat, scn.ctmFloat, patches, polyLines, forcedEdges, gradedEdges)        
 
         return{'FINISHED'}
 

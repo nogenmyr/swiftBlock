@@ -22,7 +22,7 @@
 import mathutils
 import itertools
 
-def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames, geo_edges, geo_verts, forcedEdges, gradEdges):
+def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames, polyLines, forcedEdges, gradEdges):
     logFileName = filename.replace('blockMeshDict','log.swiftblock')
     debugFileName = filename.replace('blockMeshDict','facesFound.obj')
     pvFileName = filename.replace('blockMeshDict','openInParaview.blockMesh')
@@ -40,29 +40,6 @@ def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames
         for vl in pn[2]:
             patchfaces.append(vl)
     
-    # Make a graph for later making polyLines for edges
-    graph = {}
-    for n, gv in enumerate(geo_verts):
-        nc = []
-        for e in geo_edges:
-            if n in e:
-                if n==e[0]:
-                    nc.append(e[1])
-                else:
-                    nc.append(e[0])
-        graph[n] = {}
-        for c in nc:
-            graph[n][c] = (gv-geo_verts[c]).length
-
-    # Find the vertices in the block structure which are snapped to a geomtry
-    snapped_verts = {}
-    for v in vertices_coord:
-        for gv in geo_verts:
-            mag = (v-gv).magnitude
-            if mag < 1e-6:
-                snapped_verts[vertices_coord.index(v)] = geo_verts.index(gv)
-                break
-
     # Get the blockstructure, which edges that have the same #of cells, some info on face, and edges-in-use
     logFile, block_print_out, dependent_edges, face_info, all_edges, offences, faces_as_list_of_nodes = blockFinder(edges, vertices_coord, logFileName, debugFileName)
 
@@ -116,52 +93,15 @@ def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames
             bmFile.write('    )\n')
             
     bmFile.write(');\n\nedges\n(\n')
-    for ed in all_edges:
-        if ed[0] in snapped_verts and ed[1] in snapped_verts:
-            polyLine = (shortestpath(graph,snapped_verts[ed[0]],snapped_verts[ed[1]],[],{},{}))[1]
-            bmFile.write('polyLine {} {} ('.format(*ed))
-            for i in polyLine:
-                bmFile.write('({} {} {})'.format(*geo_verts[i]))
-            bmFile.write(')\n')
+
+    for pl in polyLines:
+        bmFile.write(pl)
         
     bmFile.write(foamFileEnd())
     bmFile.close()
 
 
 # ------------------------------------------------------------------------------- #
-
-
-def shortestpath(graph,start,end,visited=[],distances={},predecessors={}):
-# Credit: Carl Nolf. http://rebrained.com/?p=392
-    import sys
-    """Find the shortest path between start and end nodes in a graph"""
-    # detect if it's the first time through, set current distance to zero
-    if not visited: distances[start]=0
-    if start==end:
-        # we've found our end node, now find the path to it, and return
-        path=[]
-        while end != None:
-            path.append(end)
-            end=predecessors.get(end,None)
-        return distances[start], path[::-1]
-    # process neighbors as per algorithm, keep track of predecessors
-    for neighbor in graph[start]:
-        if neighbor not in visited:
-            neighbordist = distances.get(neighbor,float('inf'))
-            try:
-                tentativedist = distances[start] + graph[start][neighbor]
-            except:
-                return 1,[] # No connection between verts found!
-            if tentativedist < neighbordist:
-                distances[neighbor] = tentativedist
-                predecessors[neighbor]=start
-    # neighbors processed, now mark the current node as visited
-    visited.append(start)
-    # finds the closest unvisited node to the start
-    unvisiteds = dict((k, distances.get(k,float('inf'))) for k in graph if k not in visited)
-    closestnode = min(unvisiteds, key=unvisiteds.get)
-    # now we can take the closest node and recurse, making it current
-    return shortestpath(graph,closestnode,end,visited,distances,predecessors)
 
 
 def removedup(seq): 
@@ -333,11 +273,6 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
             faces_as_list_of_nodes.append(i)
             faces_as_list_of_edges.append(tmp_e[ii])
 
-    # Change edges from being pairs of integers to pairs of vertices objects 
-#    for e in edges:
-#        e[0] = vertices_coord[e[0]]
-#        e[1] = vertices_coord[e[1]]
-
     # Create a wavefront obj file showing all the faces just found
     if len(debugFileName) > 0:
         debugFile = open(debugFileName,'w')
@@ -381,26 +316,12 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
     block_as_faceLoop = []
     for qf in faceLoops_as_list_of_faces:
         qf_is_a_block = True
-#        for v in faces_as_list_of_vertices[qf[0]]:
-#            if v in faces_as_list_of_vertices[qf[2]]: #if any of the vertices in face 0 is in face 2, this is not a block
-#                qf_is_a_block = False
         for n in faces_as_list_of_nodes[qf[0]]:
             if n in faces_as_list_of_nodes[qf[2]]: #if any of the vertices in face 0 is in face 2, this is not a block
                 qf_is_a_block = False
         if qf_is_a_block:
             block_as_faceLoop.append(qf)
       
-    # Get rid of block dublets - there are plenty
-#    faceLoops_vertices = [[] for i in range(len(block_as_faceLoop))]
-#    for qfid, qf in enumerate(block_as_faceLoop):
-#        for f in qf:
-#            for v in faces_as_list_of_vertices[f]:
-#                vid = vertices_coord.index(v)     # 1
-#                if not vid in faceLoops_vertices[qfid]:
-#                    faceLoops_vertices[qfid].append(vid)
-#    for qf in faceLoops_vertices:
-#        qf.sort()
-
     # Get rid of block dublets - there are plenty
     faceLoops_nodes = [[] for i in range(len(block_as_faceLoop))]
     for qfid, qf in enumerate(block_as_faceLoop):
@@ -444,7 +365,6 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
         if q2start == None: # if not found above - this is not a complete block.
             q1nodes = block[0:4]
             q2nodes = block[4:-1]
-#            q1nodes = [vertices_coord.index(quad1[0]),vertices_coord.index(quad1[1]),vertices_coord.index(quad1[2]),vertices_coord.index(quad1[3])]
             if len(logFileName) > 0:
                 logFile.write('one block found was incomplete! ' + str(q1nodes) + str(q2nodes) + '\n')
             continue
@@ -453,8 +373,6 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
         quad2 = []
         for i in range(4):
             quad2.append(block[(i + q2start) % 4 + 4])
-#        q1nodes = [vertices_coord.index(quad1[0]),vertices_coord.index(quad1[1]),vertices_coord.index(quad1[2]),vertices_coord.index(quad1[3])]
-#        q2nodes = [vertices_coord.index(quad2[0]),vertices_coord.index(quad2[1]),vertices_coord.index(quad2[2]),vertices_coord.index(quad2[3])]
         q1verts = [vertices_coord[quad1[0]],vertices_coord[quad1[1]],vertices_coord[quad1[2]],vertices_coord[quad1[3]]]
         q2verts = [vertices_coord[quad2[0]],vertices_coord[quad2[1]],vertices_coord[quad2[2]],vertices_coord[quad2[3]]]
         
@@ -479,7 +397,6 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
 
         if scalarProd1*scalarProd2 > 0.: # make quad1 and quad2 rotate in the same direction
             quad2 = [quad2[0], quad2[-1], quad2[-2], quad2[-3]] 
-#            q2nodes = [q2nodes[0],q2nodes[-1],q2nodes[-2],q2nodes[-3]]
             normal2 *= -1.0
 
         if scalarProd3 < 0.: # Maintain righthanded system in each block
@@ -505,7 +422,7 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
         if is_a_real_block: # this write-out only works if blenders own vertex numbering starts at zero!! seems to work...
             offences.append(0)
             block_centres.append(blockcentre)
-#            vl = [vertices_coord.index(quad1[0]),vertices_coord.index(quad1[1]),vertices_coord.index(quad1[2]),vertices_coord.index(quad1[3]),vertices_coord.index(quad2[0]),vertices_coord.index(quad2[1]),vertices_coord.index(quad2[2]),vertices_coord.index(quad2[3])]
+
             vl = quad1 + quad2
             block_print_out.append(vl) # list of verts defining the block in correct order
             i_edges = [edge(vl[0],vl[1]), edge(vl[2],vl[3]), edge(vl[4],vl[5]), edge(vl[6],vl[7])]
