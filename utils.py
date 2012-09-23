@@ -22,7 +22,7 @@
 import mathutils
 import itertools
 
-def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames, polyLines, forcedEdges, gradEdges):
+def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames, polyLines, forcedEdges, gradEdges, lengths):
     logFileName = filename.replace('blockMeshDict','log.swiftblock')
     debugFileName = filename.replace('blockMeshDict','facesFound.obj')
     pvFileName = filename.replace('blockMeshDict','openInParaview.blockMesh')
@@ -44,7 +44,7 @@ def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames
     logFile, block_print_out, dependent_edges, face_info, all_edges, offences, faces_as_list_of_nodes = blockFinder(edges, vertices_coord, logFileName, debugFileName)
 
     # Set edges resolution
-    edgeRes = setEdgeRes(vertices_coord, dependent_edges, forcedEdges, mean_res)
+    edgeRes = setEdgeRes(vertices_coord, dependent_edges, forcedEdges, mean_res, lengths)
 
     offendingBlocks = []
 
@@ -65,7 +65,7 @@ def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames
             if edge(vl[0],vl[4]) in edgeSet:
                 kres = edgeRes[es]
         if  offences[bid] <= 3: # sort out the finally valid blocks
-            gradStr = getGrading(vl, gradEdges)
+            gradStr = getGrading(vl, gradEdges, [])
             bmFile.write('    hex ({} {} {} {} {} {} {} {}) '.format(*vl) \
                        + '({} {} {}) '.format(ires,jres,kres)\
                        + gradStr + '\n' )
@@ -99,7 +99,57 @@ def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames
         
     bmFile.write(foamFileEnd())
     bmFile.close()
+    return
 
+
+def preview(edges, vertices_coord, toShow, mean_res, polyLinesPoints, forcedEdges, gradEdges, lengths, objname, obj):
+    from . import previewMesh
+    import imp, bpy
+    imp.reload(previewMesh)
+
+    # Get the blockstructure, which edges that have the same #of cells, some info on face, and edges-in-use
+    logFile, block_print_out, dependent_edges, face_info, all_edges, offences, faces_as_list_of_nodes = blockFinder(edges, vertices_coord, '','')
+
+    # Set edges resolution
+    edgeRes = setEdgeRes(vertices_coord, dependent_edges, forcedEdges, mean_res, lengths)
+
+    preview_verts = []
+    preview_edges = []
+    NoPreviewVertex = 0
+    for bid, vl in enumerate(block_print_out):
+        for es, edgeSet in enumerate(dependent_edges):
+            if edge(vl[0],vl[1]) in edgeSet:
+                ires = edgeRes[es]
+            if edge(vl[1],vl[2]) in edgeSet:
+                jres = edgeRes[es]
+            if edge(vl[0],vl[4]) in edgeSet:
+                kres = edgeRes[es]
+        if  offences[bid] <= 3: # sort out the finally valid blocks
+            gradList = []
+            gradStr = getGrading(vl, gradEdges, gradList)
+            showThisBlock = 1
+            for v in vl:
+                showThisBlock *= toShow[v]
+            if showThisBlock:
+                NoPreviewVertex, preview_verts, preview_edges = previewMesh.buildPreviewMesh(
+                       vl, vertices_coord, ires,jres,kres, 
+                       polyLinesPoints, gradList, NoPreviewVertex,
+                       preview_verts, preview_edges)
+
+    mesh_data = bpy.data.meshes.new("previewmesh")
+    mesh_data.from_pydata(preview_verts, preview_edges, [])
+    mesh_data.update()
+    preview_obj = bpy.data.objects.new('PreviewMesh', mesh_data)
+    bpy.context.scene.objects.link(preview_obj)
+    preview_obj.select = True
+    bpy.context.scene.objects.active = bpy.data.objects['PreviewMesh']
+    preview_obj['swiftBlockObj'] = objname
+    bpy.context.scene.objects.active = preview_obj
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.remove_doubles(mergedist=0.0001, use_unselected=True)
+    bpy.ops.object.mode_set(mode='OBJECT')
+    
+    return len(preview_obj.data.vertices)
 
 # ------------------------------------------------------------------------------- #
 
@@ -125,13 +175,16 @@ def couple_edges(dependent_edges):
                     return True
     return False
 
-def setEdgeRes(vertices_coord, dependent_edges, forcedEdges, mean_res):
+def setEdgeRes(vertices_coord, dependent_edges, forcedEdges, mean_res, lengths):
     edgeRes = []
     for es in dependent_edges:
         edgeLength = 0.
         for e in es:
-            evector = vertices_coord[e[0]] - vertices_coord[e[1]]
-            edgeLength += evector.magnitude
+            if edge(e[0],e[1]) in lengths[0]:
+                ind = lengths[0].index(edge(e[0],e[1]))
+                edgeLength += lengths[1][ind]
+            else:
+                print("Cannot find edge in lengths!")
         edgeRes.append(max(1,round(edgeLength / (mean_res * len(es)))))
         for fed in forcedEdges:
             v0, v1 = fed[0][0],fed[0][1] 
@@ -139,7 +192,7 @@ def setEdgeRes(vertices_coord, dependent_edges, forcedEdges, mean_res):
                 edgeRes[-1] = fed[1]
     return edgeRes
     
-def getGrading(vl, gradEdges):
+def getGrading(vl, gradEdges, listOfGrading):
     edges = []
     grading = []
     gradList = []
@@ -149,11 +202,14 @@ def getGrading(vl, gradEdges):
         grading.append(e[1])
        
     def lookupGrad(v0,v1,edges,grading):
-        grad = 0
         if [v0,v1] in edges:
             return grading[edges.index([v0,v1])]
         else:
-            return 1./grading[edges.index([v1,v0])]
+            grad = grading[edges.index([v1,v0])]
+            if grad < 0:
+                return grad # double grading feature
+            else:
+                return 1.0/grad
 
     edgeOrder = [[0,1], [3,2], [7,6], [4,5], [0,3], [1,2], [5,6], [4,7], [0,4], [1,5], [2,6], [3,7]]
     for e in edgeOrder:
@@ -161,6 +217,7 @@ def getGrading(vl, gradEdges):
         v1 = vl[e[1]]
         gradList.append(lookupGrad(v0,v1, edges,grading))
         gradStr += " " + str(lookupGrad(v0,v1, edges,grading))
+        listOfGrading += [lookupGrad(v0,v1, edges,grading)]
     return gradStr + ")"
 
 
@@ -169,7 +226,8 @@ def findFace(faces, vl):
         if vl[0] in f and vl[1] in f and vl[2] in f and vl[3] in f:
             return fid, f
     return -1, []
-            
+
+
 class cycleFinder:
 # Credit: Adam Gaither. An Efficient Block Detection Algorithm For Structured Grid Generation
 # 
@@ -183,6 +241,12 @@ class cycleFinder:
         self.facesEdges = []
         self.facesId = []
         self.no_edges = 0
+        self.v_in_edge = [[] for i in range(len(verts))]
+        for v in verts:
+            append = self.v_in_edge[v].append
+            for eid, e in enumerate(self.edges):
+                if v in e:
+                    append(eid)
 
     def buildAllFourEdgeFaces(self):
         for v in self.verticesId:
@@ -194,25 +258,19 @@ class cycleFinder:
         return self.faces,self.facesEdges
 
     def buildFourEdgeFaces(self, v):
-        v_in_edge = []
-        for eid, e in enumerate(self.edges):
-            if v in e:
-                v_in_edge.append(eid)
-
-        for eid in v_in_edge:
+        for eid in self.v_in_edge[v]:
             if not self.edgeVisited[eid]:
                 e = self.edges[eid]
                 self.no_edges += 1
                 self.edgeVisited[eid] = True
                 opposite_v = e[0]
-                if e[0] == v:
+                if opposite_v == v: # seems the other vertex is in e[1]!
                     opposite_v = e[1]
                 self.currentCycle.append(opposite_v)
                 self.currentCycleEdges.append(eid)
-                if self.cycleFormed():
+                if self.currentCycle[0] == self.currentCycle[-1]: # First equals last -> we have a face
                      if self.uniqueCycle():
                          self.faces.append(self.currentCycle[0:-1])
-                         
                          self.facesEdges.append(self.currentCycleEdges[:])
                          self.facesId.append(self.currentCycle[0:-1])
                          self.facesId[-1].sort()
@@ -224,28 +282,11 @@ class cycleFinder:
                 self.currentCycleEdges.pop()
                 self.edgeVisited[eid] = False
 
-    def cycleFormed(self):
-        if len(self.currentCycle) > 1:
-            return self.currentCycle[0] == self.currentCycle[-1]
-        else:
-            return False
-
     def uniqueCycle(self):
-        cF = self.currentCycle[:4]
-        for f in self.facesId:
-#            if cF[0] in f and cF[1] in f and cF[2] in f and cF[3] in f: 
-            notunique = 1
-            for c in cF:
-                if c in f:
-                    notunique *= 1
-                else:
-                    notunique *= 0
-            if notunique == 1:
-                return False
-        return True
-#        currentFace.sort()
-#        return not currentFace in self.facesId
-
+        cF = self.currentCycle[0:-1]
+        cF.sort()
+        return not cF in self.facesId
+        
     def VisitAllEdgeAdjacent(self, v):
         for eid, e in enumerate(self.edges):
             if v in e:
@@ -253,12 +294,10 @@ class cycleFinder:
 
 
 def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
-
     if len(logFileName) > 0:
         logFile = open(logFileName,'w')
     else:
         logFile = ''
-
 
     # Use the cycle finder class to find all edges forming quad faces
     cycFindFaces = cycleFinder(edges,range(len(vertices_coord)))
@@ -347,6 +386,7 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
     all_edges = []
     if len(logFileName) > 0:
         logFile.write('number of potential blocks identified = ' + str(len(finalBlocks)) + '\n')
+        
     for b in finalBlocks:
         is_a_real_block = True  # more sanity checks soon...
         block = []

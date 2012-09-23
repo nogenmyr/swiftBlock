@@ -1,13 +1,13 @@
 bl_info = {
-    "name": "SwiftBlock",
+    "name": "SwiftBlockExp",
     "author": "Karl-Johan Nogenmyr",
     "version": (0, 1),
-    "blender": (2, 6, 2),  # PLEASE NOTE: There is a bug in in version 2.63 which affects the shortest path code! If you really want 2.63, find a daily build version.
-    "api": 35622,
+    "blender": (2, 6, 3),  # PLEASE NOTE: There is a bug in in version 2.63 which affects the shortest path code! Solution; find a daily build version.
+    "api": 44000,
     "location": "Tool Shelf",
     "description": "Writes block geometry as blockMeshDict file",
     "warning": "not much tested yet",
-    "wiki_url": "None",
+    "wiki_url": "http://openfoamwiki.net/index.php/SwiftBlock",
     "tracker_url": "",
     "support": 'COMMUNITY',
     "category": "OpenFOAM"}
@@ -18,8 +18,70 @@ bl_info = {
 import bpy
 from bpy.props import *
 
+def getPolyLines(verts, edges):
+    scn = bpy.context.scene
+    polyLinesPoints = []
+    polyLines = ''
+    polyLinesLengths = [[], []]
+    
+    bpy.ops.wm.context_set_value(data_path="tool_settings.mesh_select_mode", value="(True,False,False)")
+    geoobj = bpy.data.objects[scn.geoobjName]
+    geo_verts = list(blender_utils.vertices_from_mesh(geoobj))
+    geo_edges = list(blender_utils.edges_from_mesh(geoobj))
+    bpy.context.scene.objects.active=bpy.data.objects[scn.geoobjName]
+    geoobj = bpy.data.objects[scn.geoobjName]
+    snapped_verts = {}
+    
+    for vid, v in enumerate(verts):
+        for gv in geo_verts:
+            mag = (v-gv).magnitude
+            if mag < 1e-6:
+                snapped_verts[vid] = geo_verts.index(gv)
+                break
+    for ed in edges:
+        if ed[0] in snapped_verts and ed[1] in snapped_verts:
+            geoobj.hide = False
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='DESELECT')
+            bpy.ops.object.mode_set(mode='OBJECT')
+            geoobj.data.vertices[snapped_verts[ed[0]]].select = True
+            geoobj.data.vertices[snapped_verts[ed[1]]].select = True
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_vertex_path(type='EDGE_LENGTH')
+
+            bpy.ops.object.mode_set(mode='OBJECT')
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.duplicate()
+            bpy.ops.object.mode_set(mode='OBJECT')
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.separate(type='SELECTED')
+            bpy.ops.object.mode_set(mode='OBJECT')
+            polyLineobj = bpy.data.objects[scn.geoobjName+'.001']
+            if len(polyLineobj.data.vertices) > 2:
+                polyLineverts = list(blender_utils.vertices_from_mesh(polyLineobj))
+                polyLineedges = list(blender_utils.edges_from_mesh(polyLineobj))
+                for vid, v in enumerate(polyLineverts):
+                    mag = (v-verts[ed[0]]).magnitude
+                    if mag < 1e-6:
+                        startVertex = vid
+                        break
+                polyLineStr, vectors, length = sortedVertices(polyLineverts,polyLineedges,startVertex)
+                polyLinesPoints.append([ed[0],ed[1],vectors])
+                polyLinesLengths[0].append([min(ed[0],ed[1]), max(ed[0],ed[1])]) # write out sorted
+                polyLinesLengths[1].append(length) 
+                polyLine = 'polyLine {} {} ('.format(*ed)
+                polyLine += polyLineStr
+                polyLine += ')\n'
+                polyLines += polyLine
+
+            geoobj.select = False
+            polyLineobj.select = True
+            bpy.ops.object.delete()
+    return polyLines, polyLinesPoints, polyLinesLengths
+
 def sortedVertices(verts,edges,startVert):
     sorted = []
+    vectors = []
     sorted.append(startVert)
     vert = startVert
     length = len(edges)+1
@@ -34,9 +96,13 @@ def sortedVertices(verts,edges,startVert):
                 vert = sorted[-1]
                 break
     polyLine = ''
-    for v in sorted:
+    length = 0.
+    for vid, v in enumerate(sorted):
         polyLine += '({} {} {})'.format(*verts[v])
-    return polyLine
+        vectors.append(verts[v])
+        if vid>1:
+            length += (vectors[vid] - vectors[vid-1]).magnitude
+    return polyLine, vectors, length
 
 def patchColor(patch_no):
     color = [(1.0,0.,0.), (0.0,1.,0.),(0.0,0.,1.),(0.707,0.707,0),(0,0.707,0.707),(0.707,0,0.707)]
@@ -57,7 +123,7 @@ def initProperties():
         min = 0)
  
     bpy.types.Scene.resForce = IntProperty(
-        name = "Resolution", 
+        name = "# cells", 
         description = "For forcing the number of cells on edge (0 disables)",
         default = 0,
         min = 0)
@@ -67,6 +133,12 @@ def initProperties():
         description = "The size ratio of first and last cell on edge",
         default = 1.0)
  
+    bpy.types.Scene.whichCell = EnumProperty(
+        items = [('Coarse', 'Coarse', 'Let the coarse cells have the target resolution'), 
+                 ('Fine', 'Fine', 'Let the fine cells have the target resolution')
+                 ],
+        name = "Cell resolution")
+        
     bpy.types.Scene.setEdges = BoolProperty(
         name = "Set edges", 
         description = "Should edges be fetched from another object?",
@@ -109,9 +181,14 @@ class UIPanel(bpy.types.Panel):
         try:
             obj['swiftblock']
         except:
-            layout.operator("enable.swiftblock")
+            try:
+                obj['swiftBlockObj']
+                layout.operator("delete.preview")
+            except:
+                layout.operator("enable.swiftblock")
         else:
             layout.operator("write.bmdfile")
+            layout.operator("create.preview")
             layout.operator("find.broken")
             layout.prop(scn, 'ctmFloat')
             layout.prop(scn, 'resFloat')
@@ -128,10 +205,13 @@ class UIPanel(bpy.types.Panel):
             split = box.split()
             col = split.column()
             col.prop(scn, 'resForce')
-            col.operator("set.edgeres")
-            col = split.column()
             col.prop(scn, 'grading')
+            col.operator("flip.edge")
+            col = split.column()
+            col.operator("set.edgeres")
+            col.row().prop(scn,"whichCell", expand=True)
             col.operator("set.grading")
+
             box = layout.box()
             box.label(text='Patch settings')
             box.prop(scn, 'patchName')
@@ -148,6 +228,46 @@ class UIPanel(bpy.types.Panel):
                 except:
                     pass
 
+
+class OBJECT_OT_flipEdge(bpy.types.Operator):
+    '''Flip direction of selected edge(s). This is useful if you want to \
+set grading on several edges which are initially misaligned'''
+    bl_idname = "flip.edge"
+    bl_label = "Flip edge"
+
+    def execute(self, context):
+        bpy.ops.object.mode_set(mode='OBJECT')
+        obj = context.active_object
+        for e in obj.data.edges:
+            if e.select:
+                (e0, e1) = e.vertices
+                e.vertices = (e1, e0)
+
+        bpy.ops.object.mode_set(mode='EDIT')
+        return {'FINISHED'}
+    
+class OBJECT_OT_deletePreview(bpy.types.Operator):
+    '''Delete preview mesh object'''
+    bl_idname = "delete.preview"
+    bl_label = "Delete preview mesh"
+
+    def execute(self, context):
+        bpy.ops.object.mode_set(mode='OBJECT')
+        name = ''
+        for obj in bpy.data.objects:
+            try:
+                name = obj['swiftBlockObj']
+            except:
+                obj.select = False
+        bpy.ops.object.delete()
+        try:        
+            obj = bpy.data.objects[name]
+            obj.select = True
+            bpy.context.scene.objects.active = obj
+        except:
+            pass
+        return {'FINISHED'}
+    
 class OBJECT_OT_ChangeGeoObj(bpy.types.Operator):
     '''Click to change object'''
     bl_idname = "change.geoobj"
@@ -258,7 +378,8 @@ class OBJECT_OT_SetEdgeRes(bpy.types.Operator):
 
 
 class OBJECT_OT_SetGrading(bpy.types.Operator):
-    '''Set grading on selected edge (Ctrl-Alt-Space to find out orientation)'''
+    '''Set grading on selected edge(s). Use Ctrl-Alt-Space to find out orientation of each edge. \
+Cells will be coarser in the edge's z-direction for grading > 1'''
     bl_idname = "set.grading"
     bl_label = "Set grading"
 # This very messy way to keep track of grading is needed as we have to store the info
@@ -270,6 +391,11 @@ class OBJECT_OT_SetGrading(bpy.types.Operator):
         scn = context.scene
         obj = context.active_object
         grad = scn.grading
+        if scn.whichCell == 'Fine':
+            use_seam = True
+        else:
+            use_seam = False
+            
         bpy.ops.object.mode_set(mode='OBJECT')
         try:
             obj['creaseToGradMap']
@@ -297,6 +423,9 @@ class OBJECT_OT_SetGrading(bpy.types.Operator):
         for e in obj.data.edges:
             if e.select == True:
                  e.crease = crease/100.
+                 e.use_seam = use_seam
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.object.mode_set(mode='OBJECT')
         bpy.ops.object.mode_set(mode='EDIT')
         return {'FINISHED'}
 
@@ -375,6 +504,113 @@ class OBJECT_OT_GetPatch(bpy.types.Operator):
         scn.patchName = self.whichPatch
         return {'FINISHED'}
 
+class OBJECT_OT_createPreview(bpy.types.Operator):
+    '''Creates a mesh preview as a separate object from selected vertices'''
+    bl_idname = "create.preview"
+    bl_label = "Preview"
+    
+    def execute(self, context):
+        if context.scene.setEdges:
+            try:
+                bpy.data.objects[context.scene.geoobjName]
+            except:
+                self.report({'INFO'}, "Cannot find object for edges!")        
+                return{'CANCELLED'}
+        from . import utils
+        import imp, math
+        imp.reload(utils)
+        from . import blender_utils
+        scn = context.scene
+        obj = context.active_object
+
+        bpy.ops.object.mode_set(mode='OBJECT') #update
+        bpy.ops.object.mode_set(mode='EDIT')
+
+        verts = list(blender_utils.vertices_from_mesh(obj))
+        edges = list(blender_utils.edges_from_mesh(obj))
+
+        toShow = [0 for i in range(len(verts))]  # A block is previewed if all vertices are selected
+        allOff = True
+        for vid in range(len(verts)):
+            if obj.data.vertices[vid].select:
+                toShow[vid] = 1
+                allOff = False
+        if allOff: # All vertices were unselected - proceed with previewing all blocks
+            toShow = [1 for i in range(len(verts))]
+
+        forcedEdges = []
+        for e in obj.data.edges:
+            if e.bevel_weight >= 0.001:
+                N = obj['bevelToResMap'][str(round(e.bevel_weight*100))]
+                forcedEdges.append([[e.vertices[0],e.vertices[1]], N])
+
+        gradedEdges = []
+        for e in obj.data.edges:
+            if e.crease == 0:
+                grad = 1
+            else:
+                grad = obj['creaseToGradMap'][str(round(e.crease*100))]
+            gradedEdges.append([[e.vertices[0],e.vertices[1]], grad, e.use_seam])
+
+        bpy.ops.object.mode_set(mode='OBJECT')
+        obj.select = False
+        if scn.setEdges:
+            polyLines, polyLinesPoints, lengths = getPolyLines(verts, edges)
+        else:
+            polyLinesPoints = []
+            lengths = [[], []]
+            
+        dx0 = scn.resFloat
+        effective_lengths = [[], []]
+        for e in edges:
+            if e in lengths[0]:
+                ind = lengths[0].index(e)
+                length = lengths[1][ind]
+            elif [e[0],e[1]] in lengths[0]:
+                ind = lengths[0].index([e[0],e[1]])
+                length = lengths[1][ind]
+            else:
+                length = (verts[e[0]] - verts[e[1]]).magnitude
+
+            if length < 1e-6:
+                self.report({'INFO'}, "Zero length edge detected, check block structure!")        
+                return{'FINISHED'}
+                
+            for ge in gradedEdges:
+                if ge[0] == e or ge[0] == [e[0],e[1]]:
+                    grad = ge[1]
+                    fine = ge[2]
+                    break
+            if fine: #Fine cells should match the target resolution, this means fewer total cells
+                if grad > 1.00001:
+                    if grad*dx0/length < 1:
+                        length *= (math.log(grad)/(math.log(1-dx0/length)-math.log(1-grad*dx0/length)) +1) * dx0/length
+                elif grad < 0.99999:
+                    if dx0/length < 1:
+                        length /= (math.log(grad)/(math.log(1-dx0/length)-math.log(1-grad*dx0/length)) +1) * dx0/length
+                else:
+                    pass
+            else: #Coarse cells should match the target resolution, this means more total cells
+                if grad > 1.00001:
+                    if dx0/length < 1:
+                        length *= (math.log(grad)/(math.log(1-dx0/(length*grad))-math.log(1-dx0/length)) +1) * dx0/length
+                elif grad < 0.99999:
+                    if dx0/(length*grad) < 1:
+                        length /= (math.log(grad)/(math.log(1-dx0/(length*grad))-math.log(1-dx0/length)) +1) * dx0/length
+                else:
+                    pass
+        # Now we have a final effective edge length. Lets store!
+            effective_lengths[0].append([min(e[0],e[1]), max(e[0],e[1])]) # write out sorted
+            effective_lengths[1].append(length) 
+
+        size = utils.preview(edges, verts, toShow, scn.resFloat/scn.ctmFloat, 
+                polyLinesPoints, forcedEdges, gradedEdges, effective_lengths, obj.name, obj)
+
+        if not size:
+            self.report({'INFO'}, "Preview mesh is empty. Too few vertices selected, or broken block structure!")
+
+        return{'FINISHED'}
+
 class OBJECT_OT_writeBMD(bpy.types.Operator):
     '''Writes out a blockMeshDict file for the currently selected object'''
     bl_idname = "write.bmdfile"
@@ -392,6 +628,7 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
             description="Filepath used for exporting the file",
             maxlen=1024,
             subtype='FILE_PATH',
+            default='/opt',
             )
     check_existing = BoolProperty(
             name="Check Existing",
@@ -407,13 +644,16 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
             except:
                 self.report({'INFO'}, "Cannot find object for edges!")        
                 return{'CANCELLED'}
-        self.filepath = 'blockMeshDict'
+        try:
+            self.filepath = context.active_object['path']
+        except:
+            self.filepath = 'blockMeshDict'
         bpy.context.window_manager.fileselect_add(self)
         return {'RUNNING_MODAL'}
     
     def execute(self, context):
         from . import utils
-        import imp
+        import imp, math
         imp.reload(utils)
         from . import blender_utils
         scn = context.scene
@@ -422,6 +662,7 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
         patchtypes = list()
         patchverts = list()
         patches = list()
+        obj['path'] = self.filepath
 
         bpy.ops.object.mode_set(mode='OBJECT')   # Refresh mesh object
         bpy.ops.object.mode_set(mode='EDIT')
@@ -465,66 +706,67 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
                 grad = 1
             else:
                 grad = obj['creaseToGradMap'][str(round(e.crease*100))]
-            gradedEdges.append([[e.vertices[0],e.vertices[1]], grad])
+            gradedEdges.append([[e.vertices[0],e.vertices[1]], grad, e.use_seam])
 
         bpy.ops.object.mode_set(mode='OBJECT')
-        polyLines = ''
-        
+        obj.select = False
         if scn.setEdges:
-            bpy.ops.wm.context_set_value(data_path="tool_settings.mesh_select_mode", value="(True,False,False)")
-            geoobj = bpy.data.objects[scn.geoobjName]
-            geo_verts = list(blender_utils.vertices_from_mesh(geoobj))
-            geo_edges = list(blender_utils.edges_from_mesh(geoobj))
-            bpy.context.scene.objects.active=bpy.data.objects[scn.geoobjName]
-            geoobj = bpy.data.objects[scn.geoobjName]
-            snapped_verts = {}
-            for vid, v in enumerate(verts):
-                for gv in geo_verts:
-                    mag = (v-gv).magnitude
-                    if mag < 1e-6:
-                        snapped_verts[vid] = geo_verts.index(gv)
-                        break
-            for ed in edges:
-                if ed[0] in snapped_verts and ed[1] in snapped_verts:
-                    geoobj.hide = False
-                    bpy.ops.object.mode_set(mode='EDIT')
-                    bpy.ops.mesh.select_all(action='DESELECT')
-                    bpy.ops.object.mode_set(mode='OBJECT')
-                    geoobj.data.vertices[snapped_verts[ed[0]]].select = True
-                    geoobj.data.vertices[snapped_verts[ed[1]]].select = True
-                    bpy.ops.object.mode_set(mode='EDIT')
-                    bpy.ops.mesh.select_vertex_path(type='EDGE_LENGTH')
+            polyLines, polyLinesPoints, lengths = getPolyLines(verts, edges)
+        else:
+            polyLines = ''
+            lengths = [[], []]
 
-                    bpy.ops.object.mode_set(mode='OBJECT')
-                    bpy.ops.object.mode_set(mode='EDIT')
-                    bpy.ops.mesh.duplicate()
-                    bpy.ops.object.mode_set(mode='OBJECT')
-                    bpy.ops.object.mode_set(mode='EDIT')
-                    bpy.ops.mesh.separate(type='SELECTED')
-                    bpy.ops.object.mode_set(mode='OBJECT')
-                    polyLineobj = bpy.data.objects[scn.geoobjName+'.001']
-                    polyLineverts = list(blender_utils.vertices_from_mesh(polyLineobj))
-                    polyLineedges = list(blender_utils.edges_from_mesh(polyLineobj))
-                    for vid, v in enumerate(polyLineverts):
-                        mag = (v-verts[ed[0]]).magnitude
-                        if mag < 1e-6:
-                            startVertex = vid
-                            break
-                    polyLine = 'polyLine {} {} ('.format(*ed)
-                    polyLine += sortedVertices(polyLineverts,polyLineedges,startVertex)
-                    polyLine += ')\n'
-                    print(polyLine)
-                    polyLines += polyLine
-                    geoobj.select = False
-                    obj.select = False
-                    polyLineobj.select = True
-                    bpy.ops.object.delete()
+        dx0 = scn.resFloat
+        effective_lengths = [[], []]
+        for e in edges:
+            if e in lengths[0]:
+                ind = lengths[0].index(e)
+                length = lengths[1][ind]
+            elif [e[0],e[1]] in lengths[0]:
+                ind = lengths[0].index([e[0],e[1]])
+                length = lengths[1][ind]
+            else:
+                length = (verts[e[0]] - verts[e[1]]).magnitude
+
+            if length < 1e-6:
+                self.report({'INFO'}, "Zero length edge detected, check block structure!")        
+                return{'FINISHED'}
+                
+            for ge in gradedEdges:
+                if ge[0] == e or ge[0] == [e[0],e[1]]:
+                    grad = ge[1]
+                    fine = ge[2]
+                    break
+            if fine: #Fine cells should match the target resolution, this means fewer total cells
+                if grad > 1.00001:
+                    if grad*dx0/length < 1:
+                        length *= (math.log(grad)/(math.log(1-dx0/length)-math.log(1-grad*dx0/length)) +1) * dx0/length
+                elif grad < 0.99999:
+                    if dx0/length < 1:
+                        length /= (math.log(grad)/(math.log(1-dx0/length)-math.log(1-grad*dx0/length)) +1) * dx0/length
+                else:
+                    pass
+            else: #Coarse cells should match the target resolution, this means more total cells
+                if grad > 1.00001:
+                    if dx0/length < 1:
+                        length *= (math.log(grad)/(math.log(1-dx0/(length*grad))-math.log(1-dx0/length)) +1) * dx0/length
+                elif grad < 0.99999:
+                    if dx0/(length*grad) < 1:
+                        length /= (math.log(grad)/(math.log(1-dx0/(length*grad))-math.log(1-dx0/length)) +1) * dx0/length
+                else:
+                    pass
+        # Now we have a final effective edge length. Lets store!
+            effective_lengths[0].append([min(e[0],e[1]), max(e[0],e[1])]) # write out sorted
+            effective_lengths[1].append(length) 
+
         obj.select = True
         bpy.context.scene.objects.active = obj
 
-        utils.write(self.filepath, edges, verts, scn.resFloat/scn.ctmFloat, scn.ctmFloat, patches, polyLines, forcedEdges, gradedEdges)        
-
+        utils.write(self.filepath, edges, verts, 
+            scn.resFloat/scn.ctmFloat, scn.ctmFloat, 
+            patches, polyLines, forcedEdges, gradedEdges, effective_lengths)        
         return{'FINISHED'}
+
 
 initProperties()
 
