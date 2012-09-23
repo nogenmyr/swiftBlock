@@ -1,5 +1,5 @@
 bl_info = {
-    "name": "SwiftBlockExp",
+    "name": "SwiftBlock",
     "author": "Karl-Johan Nogenmyr",
     "version": (0, 1),
     "blender": (2, 6, 3),  # PLEASE NOTE: There is a bug in in version 2.63 which affects the shortest path code! Solution; find a daily build version.
