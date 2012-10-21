@@ -132,7 +132,7 @@ class lineDivide:
         return self.divisions_;
 
 
-def buildPreviewMesh(corners, vertices_coord, ni, nj, nk, polyLinesPoints, gradList, vertexNo, preview_verts, preview_edges):
+def buildPreviewMesh(corners, vertices_coord, ni, nj, nk, polyLinesPoints, gradList, vertexNo, preview_verts, preview_edges, preview_faces):
     import bpy
     def vtxLabel(i, j, k, ni, nj, nk): # surface mesh... looks messy
         def f(ind, maxind):
@@ -366,6 +366,7 @@ def buildPreviewMesh(corners, vertices_coord, ni, nj, nk, polyLinesPoints, gradL
                     if (k == 0 or k == nk) and i>0 and j>0: #interior
                         preview_edges.append([vertexNo, vtxLabel(i-1, j, k, ni, nj, nk) + offset])
                         preview_edges.append([vertexNo, vtxLabel(i, j-1, k, ni, nj, nk) + offset])
+                        preview_faces.append([vtxLabel(i-1, j-1, k, ni, nj, nk) + offset, vtxLabel(i-1, j, k, ni, nj, nk) + offset, vtxLabel(i, j, k, ni, nj, nk) + offset])
                     elif (k == 0 or k == nk) and (i == 0 or i == ni ) and j>0:
                         preview_edges.append([vertexNo, vtxLabel(i, j-1, k, ni, nj, nk) + offset])
                     elif (k == 0 or k == nk) and (j == 0 or j == nj) and i>0:
@@ -381,4 +382,4 @@ def buildPreviewMesh(corners, vertices_coord, ni, nj, nk, polyLinesPoints, gradL
                         
 
   
-    return ( (ni+1) * (nj+1) ) * 2  + (ni*2+nj*2) * (nk-1) + offset, preview_verts, preview_edges
+    return ( (ni+1) * (nj+1) ) * 2  + (ni*2+nj*2) * (nk-1) + offset, preview_verts, preview_edges, preview_faces

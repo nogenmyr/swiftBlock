@@ -22,7 +22,7 @@
 import mathutils
 import itertools
 
-def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames, polyLines, forcedEdges, gradEdges, lengths):
+def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames, polyLines, forcedEdges, gradEdges, lengths, vertexNames, disabled):
     logFileName = filename.replace('blockMeshDict','log.swiftblock')
     debugFileName = filename.replace('blockMeshDict','facesFound.obj')
     pvFileName = filename.replace('blockMeshDict','openInParaview.blockMesh')
@@ -41,7 +41,7 @@ def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames
             patchfaces.append(vl)
     
     # Get the blockstructure, which edges that have the same #of cells, some info on face, and edges-in-use
-    logFile, block_print_out, dependent_edges, face_info, all_edges, offences, faces_as_list_of_nodes = blockFinder(edges, vertices_coord, logFileName, debugFileName)
+    logFile, block_print_out, dependent_edges, face_info, all_edges, faces_as_list_of_nodes = blockFinder(edges, vertices_coord, logFileName, debugFileName, disabled)
 
     # Set edges resolution
     edgeRes = setEdgeRes(vertices_coord, dependent_edges, forcedEdges, mean_res, lengths)
@@ -56,7 +56,12 @@ def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames
         bmFile.write('    ({} {} {})\n'.format(*v))
     bmFile.write(");\nblocks\n(\n")
     
+    NoCells = 0
     for bid, vl in enumerate(block_print_out):
+        blockName = ''
+        for name in vertexNames:
+            if all( v in name[1] for v in vl ):
+                blockName = name[0]
         for es, edgeSet in enumerate(dependent_edges):
             if edge(vl[0],vl[1]) in edgeSet:
                 ires = edgeRes[es]
@@ -64,14 +69,11 @@ def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames
                 jres = edgeRes[es]
             if edge(vl[0],vl[4]) in edgeSet:
                 kres = edgeRes[es]
-        if  offences[bid] <= 3: # sort out the finally valid blocks
-            gradStr = getGrading(vl, gradEdges, [])
-            bmFile.write('    hex ({} {} {} {} {} {} {} {}) '.format(*vl) \
-                       + '({} {} {}) '.format(ires,jres,kres)\
-                       + gradStr + '\n' )
-        else:
-            offendingBlocks.append(bid)
-    logFile.write('offendingBlocks: ' + str(offendingBlocks) + '\n')
+        NoCells += ires*jres*kres
+        gradStr = getGrading(vl, gradEdges, [])
+        bmFile.write('    hex ({} {} {} {} {} {} {} {}) '.format(*vl) \
+                   + blockName + ' ({} {} {}) '.format(ires,jres,kres)\
+                   + gradStr + '\n' )
 
     for f in face_info:
         for bid in offendingBlocks:
@@ -99,23 +101,25 @@ def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames
         
     bmFile.write(foamFileEnd())
     bmFile.close()
-    return
+    return NoCells
 
 
-def preview(edges, vertices_coord, toShow, mean_res, polyLinesPoints, forcedEdges, gradEdges, lengths, objname, obj):
+def preview(edges, vertices_coord, toShow, mean_res, polyLinesPoints, forcedEdges, gradEdges, lengths, objname, obj, disabled):
     from . import previewMesh
     import imp, bpy
     imp.reload(previewMesh)
 
     # Get the blockstructure, which edges that have the same #of cells, some info on face, and edges-in-use
-    logFile, block_print_out, dependent_edges, face_info, all_edges, offences, faces_as_list_of_nodes = blockFinder(edges, vertices_coord, '','')
+    logFile, block_print_out, dependent_edges, face_info, all_edges, faces_as_list_of_nodes = blockFinder(edges, vertices_coord, '','', disabled)
 
     # Set edges resolution
     edgeRes = setEdgeRes(vertices_coord, dependent_edges, forcedEdges, mean_res, lengths)
 
     preview_verts = []
     preview_edges = []
+    preview_faces = []
     NoPreviewVertex = 0
+    NoCells = 0
     for bid, vl in enumerate(block_print_out):
         for es, edgeSet in enumerate(dependent_edges):
             if edge(vl[0],vl[1]) in edgeSet:
@@ -124,20 +128,22 @@ def preview(edges, vertices_coord, toShow, mean_res, polyLinesPoints, forcedEdge
                 jres = edgeRes[es]
             if edge(vl[0],vl[4]) in edgeSet:
                 kres = edgeRes[es]
-        if  offences[bid] <= 3: # sort out the finally valid blocks
-            gradList = []
-            gradStr = getGrading(vl, gradEdges, gradList)
-            showThisBlock = 1
-            for v in vl:
-                showThisBlock *= toShow[v]
-            if showThisBlock:
-                NoPreviewVertex, preview_verts, preview_edges = previewMesh.buildPreviewMesh(
-                       vl, vertices_coord, ires,jres,kres, 
-                       polyLinesPoints, gradList, NoPreviewVertex,
-                       preview_verts, preview_edges)
+        NoCells += ires*jres*kres
+        gradList = []
+        gradStr = getGrading(vl, gradEdges, gradList)
+        showThisBlock = 1
+        for v in vl:
+            showThisBlock *= toShow[v]
+        if showThisBlock:
+            NoPreviewVertex, preview_verts, preview_edges, preview_faces = previewMesh.buildPreviewMesh(
+                   vl, vertices_coord, ires,jres,kres, 
+                   polyLinesPoints, gradList, NoPreviewVertex,
+                   preview_verts, preview_edges, preview_faces)
 
+# For now adding faces to preview mesh, gives an error... dont know why
+    preview_faces = []
     mesh_data = bpy.data.meshes.new("previewmesh")
-    mesh_data.from_pydata(preview_verts, preview_edges, [])
+    mesh_data.from_pydata(preview_verts, preview_edges, preview_faces)
     mesh_data.update()
     preview_obj = bpy.data.objects.new('PreviewMesh', mesh_data)
     bpy.context.scene.objects.link(preview_obj)
@@ -149,7 +155,7 @@ def preview(edges, vertices_coord, toShow, mean_res, polyLinesPoints, forcedEdge
     bpy.ops.mesh.remove_doubles(mergedist=0.0001, use_unselected=True)
     bpy.ops.object.mode_set(mode='OBJECT')
     
-    return len(preview_obj.data.vertices)
+    return len(preview_obj.data.vertices), NoCells
 
 # ------------------------------------------------------------------------------- #
 
@@ -293,7 +299,7 @@ class cycleFinder:
                 self.edgeVisited[eid]
 
 
-def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
+def blockFinder(edges, vertices_coord, logFileName='', debugFileName='', disabled = []):
     if len(logFileName) > 0:
         logFile = open(logFileName,'w')
     else:
@@ -372,22 +378,22 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
         qf.sort()
 
     tmp = []
-    finalBlocks = [] # Each block is identified several times. Condense and put in finalBlocks (list of vertices index)
+    potentialBlocks = [] # Each block is identified several times. Condense and put in potentialBlocks (list of vertices index)
     for qfid, qf in enumerate(faceLoops_nodes):
         if not qf in tmp:
             tmp.append(qf)
             if len(qf) == 8:
-                finalBlocks.append(block_as_faceLoop[qfid])
+                potentialBlocks.append(block_as_faceLoop[qfid])
 
     offences = []
     block_centres = []
-    block_print_out = []
+    formalBlocks = []
     dependent_edges = []
     all_edges = []
     if len(logFileName) > 0:
-        logFile.write('number of potential blocks identified = ' + str(len(finalBlocks)) + '\n')
+        logFile.write('number of potential blocks identified = ' + str(len(potentialBlocks)) + '\n')
         
-    for b in finalBlocks:
+    for b in potentialBlocks:
         is_a_real_block = True  # more sanity checks soon...
         block = []
         for n in faces_as_list_of_nodes[b[0]]:
@@ -422,8 +428,8 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
         q1fid, tmp = findFace(faces_as_list_of_nodes, quad1)
         q2fid, tmp = findFace(faces_as_list_of_nodes, quad2)
 
-        normal1 = mathutils.geometry.normal(q1verts[0], q1verts[1], q1verts[2], q1verts[3])
-        normal2 = mathutils.geometry.normal(q2verts[0], q2verts[1], q2verts[2], q2verts[3])
+        normal1 = mathutils.geometry.normal(*q1verts)
+        normal2 = mathutils.geometry.normal(*q2verts)
 
         facecentre1 = face_info[q1fid]['centre']
         facecentre2 = face_info[q2fid]['centre']
@@ -453,8 +459,8 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
         if not is_a_real_block:
             continue
    # more sanity...
-        volume_scale = pow(normal1.dot(normal1), 1.5)
-        if (abs(scalarProd3/volume_scale) < 0.001): # if this should be a block, I dont want to be the cfd-code!! :)
+        scale = v04.magnitude * normal1.magnitude
+        if (abs(scalarProd3/scale) < 0.01): # abs(sin(alpha)) < 0.01, where alpha is angle for normal1 and v04
             if len(logFileName) > 0:
                 logFile.write('flat block ruled out!' + str(quad1) + str(quad2) + '\n')
             continue
@@ -464,29 +470,12 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
             block_centres.append(blockcentre)
 
             vl = quad1 + quad2
-            block_print_out.append(vl) # list of verts defining the block in correct order
-            i_edges = [edge(vl[0],vl[1]), edge(vl[2],vl[3]), edge(vl[4],vl[5]), edge(vl[6],vl[7])]
-            j_edges = [edge(vl[1],vl[2]), edge(vl[3],vl[0]), edge(vl[5],vl[6]), edge(vl[7],vl[4])]
-            k_edges = [edge(vl[0],vl[4]), edge(vl[1],vl[5]), edge(vl[2],vl[6]), edge(vl[3],vl[7])]
-            dependent_edges.append(i_edges) #these 4 edges have the same resolution
-            dependent_edges.append(j_edges) #these 4 edges have the same resolution
-            dependent_edges.append(k_edges) #these 4 edges have the same resolution
-            for e in range(4):
-                if not i_edges[e] in all_edges:
-                    all_edges.append(i_edges[e])
-                if not j_edges[e] in all_edges:
-                    all_edges.append(j_edges[e])
-                if not k_edges[e] in all_edges:
-                    all_edges.append(k_edges[e])
+            formalBlocks.append(vl) # list of verts defining the block in correct order
 
-    still_coupling = True
-    while still_coupling: # Couple dependent edges. This should actually be done later, as non-valid block now may lower the degrees of freedom
-        still_coupling = couple_edges(dependent_edges)
+# formalBlocks are blocks that hava formal block structure and are not flat. Still in and O-mesh there are more formal
+# blocks present than what we want. More filtering...
 
-    for es, edgeSet in enumerate(dependent_edges): # remove duplicates in lists
-        dependent_edges[es] = removedup(edgeSet)
-
-    for bid, vl in enumerate(block_print_out):
+    for bid, vl in enumerate(formalBlocks):
         fs = []
         fs.append(vl[0:4])
         fs.append(vl[4:8])
@@ -513,7 +502,40 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName=''):
             for bid in face_info[f]['neg']:
                 offences[bid] += 1
 
-    return logFile, block_print_out, dependent_edges, face_info, all_edges, offences, faces_as_list_of_nodes
+    block_print_out = []
+    for bid, vl in enumerate(formalBlocks):
+        if offences[bid] <= 3 and not all( v in disabled for v in vl ):
+            block_print_out.append(vl)
+            i_edges = [edge(vl[0],vl[1]), edge(vl[2],vl[3]), edge(vl[4],vl[5]), edge(vl[6],vl[7])]
+            j_edges = [edge(vl[1],vl[2]), edge(vl[3],vl[0]), edge(vl[5],vl[6]), edge(vl[7],vl[4])]
+            k_edges = [edge(vl[0],vl[4]), edge(vl[1],vl[5]), edge(vl[2],vl[6]), edge(vl[3],vl[7])]
+            dependent_edges.append(i_edges) #these 4 edges have the same resolution
+            dependent_edges.append(j_edges) #these 4 edges have the same resolution
+            dependent_edges.append(k_edges) #these 4 edges have the same resolution
+            for e in range(4):
+                if not i_edges[e] in all_edges:
+                    all_edges.append(i_edges[e])
+                if not j_edges[e] in all_edges:
+                    all_edges.append(j_edges[e])
+                if not k_edges[e] in all_edges:
+                    all_edges.append(k_edges[e])
+        else:  # Dont let non-allowed blocks to stop definition of patch names
+            for f in face_info:
+                if bid in face_info[f]['pos']:
+                    ind = face_info[f]['pos'].index(bid)
+                    face_info[f]['pos'].pop(ind)
+                if bid in face_info[f]['neg']:
+                    ind = face_info[f]['neg'].index(bid)
+                    face_info[f]['neg'].pop(ind)
+
+    still_coupling = True
+    while still_coupling:
+        still_coupling = couple_edges(dependent_edges)
+
+    for es, edgeSet in enumerate(dependent_edges): # remove duplicates in lists
+        dependent_edges[es] = removedup(edgeSet)
+
+    return logFile, block_print_out, dependent_edges, face_info, all_edges, faces_as_list_of_nodes
 
 
 
