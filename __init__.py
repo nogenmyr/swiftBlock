@@ -1,5 +1,5 @@
 bl_info = {
-    "name": "SwiftBlock",
+    "name": "SwiftBlockExp",
     "author": "Karl-Johan Nogenmyr",
     "version": (0, 1),
     "blender": (2, 6, 4),
@@ -458,6 +458,7 @@ class OBJECT_OT_deletePreview(bpy.types.Operator):
         try:        
             obj = bpy.data.objects[name]
             obj.select = True
+            obj.hide = False
             bpy.context.scene.objects.active = obj
         except:
             pass

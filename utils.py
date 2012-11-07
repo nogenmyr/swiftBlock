@@ -141,9 +141,10 @@ def preview(edges, vertices_coord, toShow, mean_res, polyLinesPoints, forcedEdge
                    preview_verts, preview_edges, preview_faces)
 
 # For now adding faces to preview mesh, gives an error... dont know why
-    preview_faces = []
+#    preview_faces = []
     mesh_data = bpy.data.meshes.new("previewmesh")
-    mesh_data.from_pydata(preview_verts, preview_edges, preview_faces)
+#    mesh_data.from_pydata(preview_verts, preview_edges, preview_faces)
+    mesh_data.from_pydata(preview_verts, [], preview_faces)
     mesh_data.update()
     preview_obj = bpy.data.objects.new('PreviewMesh', mesh_data)
     bpy.context.scene.objects.link(preview_obj)
@@ -154,6 +155,10 @@ def preview(edges, vertices_coord, toShow, mean_res, polyLinesPoints, forcedEdge
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.remove_doubles(mergedist=0.0001, use_unselected=True)
     bpy.ops.object.mode_set(mode='OBJECT')
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='DESELECT')
+    bpy.ops.wm.context_set_value(data_path="tool_settings.mesh_select_mode", value="(False,True,False)")
+    obj.hide = True
     
     return len(preview_obj.data.vertices), NoCells
 

@@ -364,21 +364,23 @@ def buildPreviewMesh(corners, vertices_coord, ni, nj, nk, polyLinesPoints, gradL
                       + corz1 + corz2 + corz3 + corz4
                     )
                     if (k == 0 or k == nk) and i>0 and j>0: #interior
-                        preview_edges.append([vertexNo, vtxLabel(i-1, j, k, ni, nj, nk) + offset])
-                        preview_edges.append([vertexNo, vtxLabel(i, j-1, k, ni, nj, nk) + offset])
-                        preview_faces.append([vtxLabel(i-1, j-1, k, ni, nj, nk) + offset, vtxLabel(i-1, j, k, ni, nj, nk) + offset, vtxLabel(i, j, k, ni, nj, nk) + offset])
-                    elif (k == 0 or k == nk) and (i == 0 or i == ni ) and j>0:
-                        preview_edges.append([vertexNo, vtxLabel(i, j-1, k, ni, nj, nk) + offset])
-                    elif (k == 0 or k == nk) and (j == 0 or j == nj) and i>0:
-                        preview_edges.append([vertexNo, vtxLabel(i-1, j, k, ni, nj, nk) + offset])
+#                        preview_edges.append([vertexNo, vtxLabel(i-1, j, k, ni, nj, nk) + offset])
+#                        preview_edges.append([vertexNo, vtxLabel(i, j-1, k, ni, nj, nk) + offset])
+                        preview_faces.append([vtxLabel(i-1, j-1, k, ni, nj, nk) + offset, vtxLabel(i-1, j, k, ni, nj, nk) + offset, vtxLabel(i, j, k, ni, nj, nk) + offset, vtxLabel(i, j-1, k, ni, nj, nk) + offset])
+#                    elif (k == 0 or k == nk) and (i == 0 or i == ni ) and j>0:
+#                        preview_edges.append([vertexNo, vtxLabel(i, j-1, k, ni, nj, nk) + offset])
+#                    elif (k == 0 or k == nk) and (j == 0 or j == nj) and i>0:
+#                        preview_edges.append([vertexNo, vtxLabel(i-1, j, k, ni, nj, nk) + offset])
                     if k>0 and (i == 0 or i == ni):
-                        preview_edges.append([vertexNo, vtxLabel(i, j, k-1, ni, nj, nk) + offset])
+#                        preview_edges.append([vertexNo, vtxLabel(i, j, k-1, ni, nj, nk) + offset])
                         if j>0:
-                            preview_edges.append([vertexNo, vtxLabel(i, j-1, k, ni, nj, nk) + offset])
+#                            preview_edges.append([vertexNo, vtxLabel(i, j-1, k, ni, nj, nk) + offset])
+                            preview_faces.append([vtxLabel(i, j-1, k-1, ni, nj, nk) + offset, vtxLabel(i, j-1, k, ni, nj, nk) + offset, vtxLabel(i, j, k, ni, nj, nk) + offset, vtxLabel(i, j, k-1, ni, nj, nk) + offset])
                     if k>0 and (j == 0 or j == nj):
-                        preview_edges.append([vertexNo, vtxLabel(i, j, k-1, ni, nj, nk) + offset])
+#                        preview_edges.append([vertexNo, vtxLabel(i, j, k-1, ni, nj, nk) + offset])
                         if i>0:
-                            preview_edges.append([vertexNo, vtxLabel(i-1, j, k, ni, nj, nk) + offset])
+#                            preview_edges.append([vertexNo, vtxLabel(i-1, j, k, ni, nj, nk) + offset])
+                            preview_faces.append([vtxLabel(i-1, j, k-1, ni, nj, nk) + offset, vtxLabel(i-1, j, k, ni, nj, nk) + offset, vtxLabel(i, j, k, ni, nj, nk) + offset, vtxLabel(i, j, k-1, ni, nj, nk) + offset])
                         
 
   
