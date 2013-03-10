@@ -22,18 +22,14 @@
 import mathutils
 import itertools
 
-def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames, polyLines, forcedEdges, gradEdges, lengths, vertexNames, disabled):
-    logFileName = filename.replace('blockMeshDict','log.swiftblock')
-    debugFileName = filename.replace('blockMeshDict','facesFound.obj')
-    pvFileName = filename.replace('blockMeshDict','openInParaview.blockMesh')
-    pvFile = open(pvFileName,'w')
-    pvFile.write('Put this file in $FOAM_CASE directory.\n')
-    pvFile.write('Then, in Paraview, open this file to analyse the blockMeshDict file.\n')
-    pvFile.write('Most useful I\'ve found the numbering of vertices.\n')
-    pvFile.write('Together with the log.swiftblock and facesFound.obj file, it will help\n')
-    pvFile.write('you identify most errors encounterd.\n\n')
-    pvFile.write('The obj file is also openable in Paraview. It contains all quad faces found.\n')
-    pvFile.close()
+def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames, polyLines, forcedEdges, gradEdges, lengths, vertexNames, disabled, logging):
+
+    if logging:
+        logFileName = filename.replace('blockMeshDict','log.swiftblock')
+        debugFileName = filename.replace('blockMeshDict','facesFound.obj')
+    else:
+        logFileName = ''
+        debugFileName = ''
     
     patchfaces = []
     for pn in patchnames:
@@ -140,10 +136,7 @@ def preview(edges, vertices_coord, toShow, mean_res, polyLinesPoints, forcedEdge
                    polyLinesPoints, gradList, NoPreviewVertex,
                    preview_verts, preview_edges, preview_faces)
 
-# For now adding faces to preview mesh, gives an error... dont know why
-#    preview_faces = []
     mesh_data = bpy.data.meshes.new("previewmesh")
-#    mesh_data.from_pydata(preview_verts, preview_edges, preview_faces)
     mesh_data.from_pydata(preview_verts, [], preview_faces)
     mesh_data.update()
     preview_obj = bpy.data.objects.new('PreviewMesh', mesh_data)
@@ -153,7 +146,7 @@ def preview(edges, vertices_coord, toShow, mean_res, polyLinesPoints, forcedEdge
     preview_obj['swiftBlockObj'] = objname
     bpy.context.scene.objects.active = preview_obj
     bpy.ops.object.mode_set(mode='EDIT')
-    bpy.ops.mesh.remove_doubles(mergedist=0.0001, use_unselected=True)
+    bpy.ops.mesh.remove_doubles(threshold=0.0001, use_unselected=True)
     bpy.ops.object.mode_set(mode='OBJECT')
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.mesh.select_all(action='DESELECT')
@@ -477,7 +470,7 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName='', disable
             vl = quad1 + quad2
             formalBlocks.append(vl) # list of verts defining the block in correct order
 
-# formalBlocks are blocks that hava formal block structure and are not flat. Still in and O-mesh there are more formal
+# formalBlocks are blocks that hava formal block structure and are not flat. Still in an O-mesh there are more formal
 # blocks present than what we want. More filtering...
 
     for bid, vl in enumerate(formalBlocks):
@@ -542,7 +535,8 @@ def blockFinder(edges, vertices_coord, logFileName='', debugFileName='', disable
 
     return logFile, block_print_out, dependent_edges, face_info, all_edges, faces_as_list_of_nodes
 
-
+def smootherProfile():
+    return [-7.438494264988549e-15, 0.008605801693457149, 0.01842475807111854, 0.029612300648478973, 0.04233898400088343, 0.05679046185429426, 0.07316690916267587, 0.09168171542424897, 0.11255925232965769, 0.13603150492164162, 0.16233335611953192, 0.19169633764727423, 0.22434071509985654, 0.26046587000768784, 0.3002390841616158, 0.34378302306103725, 0.3911624496237259, 0.44237095781465174, 0.4973187660157523, 0.5558228055972574, 0.6176004265387395, 0.6822679660953321, 0.7493451518442462, 0.8182658327045534, 0.8883948904481273, 0.9590504652620432, 1.0295299509754288, 1.0991377055224336, 1.1672121827956488, 1.233150273303395, 1.2964270258686001, 1.3566095317190248, 1.413364466852664, 1.466459481809475, 1.51575919532818, 1.5612169266010856, 1.6028634731905456, 1.640794230426153, 1.6751558000542404, 1.7061330065249791, 1.7339369799788438, 1.7587947154353591, 1.780940303263625, 1.8006078588113952, 1.8180260609303134, 1.8334141352670894, 1.8469790804055504, 1.858913924091119, 1.8693968042865756, 1.8785906885314005, 1.8785906885314005, 1.8693968042865756, 1.8589139240911188, 1.8469790804055504, 1.8334141352670896, 1.8180260609303134, 1.8006078588113952, 1.7809403032636248, 1.7587947154353591, 1.733936979978844, 1.7061330065249791, 1.6751558000542404, 1.6407942304261525, 1.6028634731905456, 1.5612169266010856, 1.51575919532818, 1.4664594818094752, 1.4133644668526637, 1.3566095317190248, 1.2964270258685997, 1.233150273303395, 1.167212182795649, 1.0991377055224336, 1.0295299509754288, 0.9590504652620429, 0.8883948904481273, 0.8182658327045538, 0.7493451518442462, 0.6822679660953324, 0.6176004265387393, 0.5558228055972576, 0.49731876601575203, 0.44237095781465174, 0.39116244962372615, 0.3437830230610369, 0.3002390841616158, 0.2604658700076876, 0.22434071509985654, 0.19169633764727423, 0.16233335611953192, 0.13603150492164162, 0.11255925232965747, 0.09168171542424897, 0.07316690916267576, 0.05679046185429426, 0.04233898400088343, 0.029612300648478973, 0.01842475807111854, 0.008605801693457149, -7.438494264988549e-15]
 
 def foamHeader():
     return """/*--------------------------------*- C++ -*----------------------------------*/

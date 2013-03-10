@@ -1,8 +1,8 @@
 bl_info = {
-    "name": "SwiftBlockExp",
+    "name": "SwiftBlock",
     "author": "Karl-Johan Nogenmyr",
     "version": (0, 1),
-    "blender": (2, 6, 4),
+    "blender": (2, 6, 6),
     "api": 44000,
     "location": "Tool Shelf",
     "description": "Writes block geometry as blockMeshDict file",
@@ -299,7 +299,7 @@ class UIPanel(bpy.types.Panel):
 
             layout.label('Block\'s name settings')
             row = layout.row()
-            row.template_list(obj, "vertex_groups", obj.vertex_groups, "active_index", rows=rows)
+            row.template_list("MESH_UL_vgroups", "", obj, "vertex_groups", obj.vertex_groups, "active_index", rows=rows)
             col = row.column(align=True)
             col.operator("object.vertex_group_add", icon='ZOOMIN', text="")
             col.operator("object.vertex_group_remove", icon='ZOOMOUT', text="").all = False
@@ -424,6 +424,81 @@ class OBJECT_OT_nosnapEdge(bpy.types.Operator):
         return {'RUNNING_MODAL'}
 
 
+class OBJECT_OT_insertSmoother(bpy.types.Operator):
+    '''Inserts a smoother'''
+    bl_idname = "insert.smoother"
+    bl_label = "Insert smoother"
+
+    def execute(self, context):
+        try:
+            bpy.data.objects[context.scene.geoobjName]
+        except:
+            self.report({'INFO'}, "Cannot find object for edges!")        
+            return{'CANCELLED'}
+        import mathutils
+        from . import utils
+        bpy.ops.object.mode_set(mode='OBJECT')
+        scn = context.scene
+        obj = context.active_object
+        obj.select=False
+        geoobj = bpy.data.objects[scn.geoobjName]
+        geoobj.hide = False
+        centre = mathutils.Vector((0,0,0))
+        no_verts = 0
+        profile = utils.smootherProfile()
+        res = profile.__len__()
+        for v in obj.data.vertices:
+            if v.select:
+                 centre += v.co
+                 no_verts += 1
+        if no_verts == 0:
+            self.report({'INFO'}, "Nothing selected!")
+            return{'CANCELLED'}
+
+        centre /= no_verts
+        if no_verts <= 2:
+             centre = mathutils.Vector((0,0,centre[2]))
+        for e in obj.data.edges:
+            if e.select:
+                (v0id, v1id) = e.vertices
+                v0 = obj.data.vertices[v0id].co
+                v1 = obj.data.vertices[v1id].co
+                edgevector = v1-v0
+                normal = centre-v0
+                tang = normal.project(edgevector)
+                normal -= tang
+                normal.normalize()
+                normal *= -edgevector.length
+                p = [v0 for i in range(res)]
+                e = [[0,1] for i in range(res)]
+                for i in range(res):
+                    linecoord = float(i)/(res-1)
+                    p[i] = (1-linecoord)*v0+linecoord*v1
+                    p[i] += 0.05*normal*profile[i]
+                for i in range(res-1):
+                    e[i] = [i,i+1]
+                mesh_data = bpy.data.meshes.new("deleteme")
+                mesh_data.from_pydata(p, e, [])
+                mesh_data.update()
+                addtoobj = bpy.data.objects.new('deleteme', mesh_data)
+                bpy.context.scene.objects.link(addtoobj)
+                bpy.data.objects['deleteme'].select = True
+                geoobj.select = True
+                scn.objects.active = geoobj
+                bpy.ops.object.join()
+                geoobj.select = False
+
+        geoobj.select = True
+        scn.objects.active = geoobj
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.remove_doubles(threshold=0.0001, use_unselected=False)
+        bpy.ops.object.mode_set(mode='OBJECT')
+        geoobj.select = False
+        obj.select = True
+        scn.objects.active = obj
+        bpy.ops.object.mode_set(mode='EDIT')
+        return {'FINISHED'}
+    
 class OBJECT_OT_flipEdge(bpy.types.Operator):
     '''Flip direction of selected edge(s). This is useful if you want to \
 set grading on several edges which are initially misaligned'''
@@ -481,7 +556,8 @@ class OBJECT_OT_Enable(bpy.types.Operator):
     def execute(self, context):
         obj = context.active_object
         obj['swiftblock'] = True
-
+        obj.data.use_customdata_edge_crease = True
+        obj.data.use_customdata_edge_bevel = True
         bpy.context.tool_settings.use_mesh_automerge = True
 
         bpy.ops.object.mode_set(mode='OBJECT')
@@ -887,6 +963,12 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
             options={'HIDDEN'},
             )
 
+    logging = BoolProperty(
+            name="Log",
+            description="Click to enable log files",
+            default=False
+            )
+
     def invoke(self, context, event):
         if context.scene.setEdges:
             try:
@@ -1038,7 +1120,7 @@ class OBJECT_OT_writeBMD(bpy.types.Operator):
         NoCells = utils.write(self.filepath, edges, verts, 
             scn.resFloat/scn.ctmFloat, scn.ctmFloat, 
             patches, polyLines, forcedEdges, gradedEdges, 
-            effective_lengths, vertexNames, disabled)
+            effective_lengths, vertexNames, disabled, self.logging)
 
         cellstr = locale.format("%d", NoCells, grouping=True)
         self.report({'INFO'}, "Cells in mesh: " + cellstr)
