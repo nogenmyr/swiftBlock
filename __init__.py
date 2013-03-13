@@ -447,9 +447,10 @@ class OBJECT_OT_insertSmoother(bpy.types.Operator):
         no_verts = 0
         profile = utils.smootherProfile()
         res = profile.__len__()
+        matrix = obj.matrix_world.copy()
         for v in obj.data.vertices:
             if v.select:
-                 centre += v.co
+                 centre += matrix*v.co 
                  no_verts += 1
         if no_verts == 0:
             self.report({'INFO'}, "Nothing selected!")
@@ -461,8 +462,8 @@ class OBJECT_OT_insertSmoother(bpy.types.Operator):
         for e in obj.data.edges:
             if e.select:
                 (v0id, v1id) = e.vertices
-                v0 = obj.data.vertices[v0id].co
-                v1 = obj.data.vertices[v1id].co
+                v0 = matrix*obj.data.vertices[v0id].co
+                v1 = matrix*obj.data.vertices[v1id].co
                 edgevector = v1-v0
                 normal = centre-v0
                 tang = normal.project(edgevector)
