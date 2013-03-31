@@ -557,11 +557,11 @@ class OBJECT_OT_Enable(bpy.types.Operator):
     def execute(self, context):
         obj = context.active_object
         obj['swiftblock'] = True
-        obj.data.use_customdata_edge_crease = True
-        obj.data.use_customdata_edge_bevel = True
         bpy.context.tool_settings.use_mesh_automerge = True
 
         bpy.ops.object.mode_set(mode='OBJECT')
+        obj.data.use_customdata_edge_crease = True
+        obj.data.use_customdata_edge_bevel = True
         bpy.ops.object.material_slot_remove()
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.mesh.select_all(action='DESELECT')
