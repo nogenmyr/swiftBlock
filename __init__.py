@@ -656,7 +656,7 @@ class OBJECT_OT_SetEdgeRes(bpy.types.Operator):
             if bevelToResMap[bevelInt] == res:  # previously used resolution - reuse!
                 bevel = int(bevelInt)
                 foundRes = True
-            currentSum += int(bevelInt)
+            currentSum += 1 #int(bevelInt)
         if not foundRes:
             bevelToResMap[str(currentSum)] = res  # create a new entry in map
             bevel = currentSum
@@ -715,7 +715,7 @@ Cells will be coarser in the edge's z-direction for grading > 1'''
             if creaseToGradMap[creaseInt] == grad:  # previously used grading - reuse!
                 crease = int(creaseInt)
                 foundGrad = True
-            currentSum += int(creaseInt)
+            currentSum += 1 # int(creaseInt)
         if not foundGrad:
             creaseToGradMap[str(currentSum)] = grad  # create a new entry in map
             crease = currentSum
