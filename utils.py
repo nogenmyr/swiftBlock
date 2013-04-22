@@ -42,7 +42,7 @@ def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames
     # Set edges resolution
     edgeRes = setEdgeRes(vertices_coord, dependent_edges, forcedEdges, mean_res, lengths)
 
-    offendingBlocks = []
+#    offendingBlocks = []
 
     bmFile = open(filename,'w')
     bmFile.write(foamHeader())
@@ -71,12 +71,12 @@ def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames
                    + blockName + ' ({} {} {}) '.format(ires,jres,kres)\
                    + gradStr + '\n' )
 
-    for f in face_info:
-        for bid in offendingBlocks:
-            if bid in face_info[f]['pos']:
-                face_info[f]['pos'].pop(face_info[f]['pos'].index(bid))
-            if bid in face_info[f]['neg']:
-                face_info[f]['neg'].pop(face_info[f]['neg'].index(bid))
+#    for f in face_info:
+#        for bid in offendingBlocks:
+#            if bid in face_info[f]['pos']:
+#                face_info[f]['pos'].pop(face_info[f]['pos'].index(bid))
+#            if bid in face_info[f]['neg']:
+#                face_info[f]['neg'].pop(face_info[f]['neg'].index(bid))
 
     bmFile.write(');\n\npatches\n(\n')
     
@@ -154,6 +154,58 @@ def preview(edges, vertices_coord, toShow, mean_res, polyLinesPoints, forcedEdge
     obj.hide = True
     
     return len(preview_obj.data.vertices), NoCells
+
+def repairFaces(edges, vertices_coord, disabled, obj, removeInternal, createBoundary):
+    import bpy
+
+    # Get the blockstructure, which edges that have the same #of cells, some info on face, and edges-in-use
+    logFile, block_print_out, dependent_edges, face_info, all_edges, faces_as_list_of_nodes = blockFinder(edges, vertices_coord, '','', disabled)
+
+    bpy.ops.wm.context_set_value(data_path="tool_settings.mesh_select_mode", value="(False,False,True)")
+
+    nRemoved = 0
+    if removeInternal:
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='DESELECT')
+        bpy.ops.object.mode_set(mode='OBJECT')
+        for f in obj.data.polygons:
+            fid, tmp = findFace(faces_as_list_of_nodes, f.vertices)
+            if fid >= 0: # face was found in list
+                if (len(face_info[fid]['neg']) + len(face_info[fid]['pos'])) > 1: #this is an internal face
+                    f.select = True
+                    nRemoved += 1
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.delete(type='ONLY_FACE')
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='DESELECT')
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+    nCreated = 0
+    if createBoundary:
+        bpy.ops.wm.context_set_value(data_path="tool_settings.mesh_select_mode", value="(True,False,False)")
+        presentFaces = []
+
+        for f in obj.data.polygons:
+            presentFaces.append(list(f.vertices))
+
+        for faceid, f in enumerate(faces_as_list_of_nodes):
+            if (len(face_info[faceid]['neg']) + len(face_info[faceid]['pos'])) == 1: #this is a boundary face
+                fid, tmp = findFace(presentFaces, f)
+                if fid < 0: # this boundary face does not exist as a blender polygon. lets create one!
+                    bpy.ops.object.mode_set(mode='EDIT')
+                    bpy.ops.mesh.select_all(action='DESELECT')
+                    bpy.ops.object.mode_set(mode='OBJECT')
+                    for v in f:
+                        obj.data.vertices[v].select = True
+                    bpy.ops.object.mode_set(mode='EDIT')
+                    bpy.ops.mesh.edge_face_add()
+                    bpy.ops.mesh.tris_convert_to_quads(limit=3.14159, uvs=False, vcols=False, sharp=False, materials=False)
+                    nCreated += 1
+    
+    bpy.ops.object.mode_set(mode='EDIT')
+    bpy.ops.mesh.select_all(action='DESELECT')
+    return nRemoved, nCreated
 
 # ------------------------------------------------------------------------------- #
 

@@ -214,6 +214,17 @@ def initProperties():
                  ('no', 'No', 'The edge will be meshed as a straight line')
                  ],
         name = "Edge snapping")
+
+    bpy.types.Scene.removeInternal = BoolProperty(
+        name = "Remove internal faces", 
+        description = "Should internal faces be removed?",
+        default = False)
+        
+    bpy.types.Scene.createBoundary = BoolProperty(
+        name = "Create boundary faces", 
+        description = "Should boundary faces be created?",
+        default = False)
+        
     return
 
 #
@@ -291,6 +302,7 @@ class UIPanel(bpy.types.Panel):
                     col.operator("set.getpatch", text=m.name + patchtype, emboss=False).whichPatch = m.name
                 except:
                     pass
+            box.operator("repair.faces")
 
             group = obj.vertex_groups.active
             rows = 2
@@ -734,13 +746,6 @@ class OBJECT_OT_FindBroken(bpy.types.Operator):
     bl_idname = "find.broken"
     bl_label = "Diagnose"
 
-    if "bpy" in locals():
-        import imp
-        if "utils" in locals():
-            imp.reload(utils)
-        if "blender_utils" in locals():
-            imp.reload(blender_utils)
-
     def execute(self, context):
         from . import utils
         import imp
@@ -776,6 +781,75 @@ class OBJECT_OT_FindBroken(bpy.types.Operator):
 
         bpy.ops.object.mode_set(mode='EDIT')
         return {'FINISHED'}
+
+
+class OBJECT_OT_RepairFaces(bpy.types.Operator):
+    '''Delete internal face and create boundary faces'''
+    bl_idname = "repair.faces"
+    bl_label = "Repair"
+
+    c = EnumProperty(
+        items = [('wall', 'wall', 'Defines the patch as wall'), 
+                 ('patch', 'patch', 'Defines the patch as generic patch'),
+                 ('empty', 'empty', 'Defines the patch as empty'),
+                 ('symmetryPlane', 'symmetryPlane', 'Defines the patch as symmetryPlane'),
+                 ],
+        name = "Patch type")
+        
+    def execute(self, context):
+        from . import utils
+        import imp
+        imp.reload(utils)
+        from . import blender_utils
+
+        removeInternal = bpy.context.scene.removeInternal
+        createBoundary = bpy.context.scene.createBoundary
+
+        if not createBoundary and not removeInternal:
+            self.report({'INFO'}, "Repair: Nothing to do!")        
+            return{'CANCELLED'}
+
+        bpy.ops.object.mode_set(mode='OBJECT')
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='DESELECT')
+        bpy.ops.object.mode_set(mode='OBJECT')
+        obj = context.active_object
+        verts = list(blender_utils.vertices_from_mesh(obj))
+        edges = list(blender_utils.edges_from_mesh(obj))
+
+        disabled = []
+        bpy.ops.wm.context_set_value(data_path="tool_settings.mesh_select_mode", value="(True,False,False)")
+        for group in obj.vertex_groups:
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='DESELECT')
+            if group.name == 'disabled':
+                bpy.ops.object.vertex_group_set_active(group=group.name)
+                bpy.ops.object.vertex_group_select()
+                bpy.ops.object.mode_set(mode='OBJECT')
+                vlist = []
+                for v in obj.data.vertices:
+                    if v.select == True:
+                        disabled += [v.index]
+
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_all(action='DESELECT')
+        bpy.ops.object.mode_set(mode='OBJECT')
+        nRemoved, nCreated = utils.repairFaces(edges, verts, disabled, obj, removeInternal, createBoundary)
+        self.report({'INFO'}, "Created {} boundary faces and removed {} internal faces".format(nCreated, nRemoved))        
+        return {'FINISHED'}
+
+    def invoke(self, context, event):
+        context.window_manager.invoke_props_dialog(self, width=200)
+        return {'RUNNING_MODAL'}  
+ 
+    def draw(self, context):
+        scn = context.scene
+        obj = context.object
+        nPatches = obj.material_slots.__len__()
+        self.layout.prop(scn, "removeInternal")
+        self.layout.prop(scn, "createBoundary")
+        self.layout.label("Assign new faces to patch")
+        self.layout.template_list("MATERIAL_UL_matslots", "", obj, "material_slots", obj, "active_material_index", rows=nPatches)
 
 
 class OBJECT_OT_GetPatch(bpy.types.Operator):
