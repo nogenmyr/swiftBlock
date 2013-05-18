@@ -1006,6 +1006,7 @@ class OBJECT_OT_createPreview(bpy.types.Operator):
 
         cellstr = locale.format("%d", NoCells, grouping=True)
         if not size:
+            bpy.ops.wm.context_set_value(data_path="tool_settings.mesh_select_mode", value="(True,False,False)")
             self.report({'INFO'}, "Preview mesh is empty. Too few vertices selected, or broken block structure!")
         else:
             self.report({'INFO'}, "Cells in mesh: " + cellstr)
