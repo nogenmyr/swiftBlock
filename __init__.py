@@ -86,7 +86,10 @@ def getPolyLines(verts, edges, obj):
             geoobj.data.vertices[snapped_verts[ed[0]]].select = True
             geoobj.data.vertices[snapped_verts[ed[1]]].select = True
             bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.mesh.select_vertex_path(type='EDGE_LENGTH')
+            try:
+                bpy.ops.mesh.select_vertex_path(type='EDGE_LENGTH')
+            except:
+                bpy.ops.mesh.shortest_path_select(use_length=True)
             bpy.ops.object.mode_set(mode='OBJECT')
             bpy.ops.object.mode_set(mode='EDIT')
             bpy.ops.mesh.duplicate()
