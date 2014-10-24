@@ -658,23 +658,40 @@ class OBJECT_OT_SetEdgeRes(bpy.types.Operator):
             obj['bevelToResMap']
         except:
             obj['bevelToResMap']= {}
+
+        existingRes = set()
+        for e in obj.data.edges:
+            if str(round(e.bevel_weight*100)) in obj['bevelToResMap']:
+                existingRes.add(round(e.bevel_weight*100))
+            else:
+                e.bevel_weight = 0 #remove bevel if no entry in bevelToResMap was found
+
+        mapEntryToRemove = set()
+        for entry in obj['bevelToResMap']:
+            if not int(entry) in existingRes:
+                mapEntryToRemove.add(entry)
+
+        for entry in mapEntryToRemove:
+            obj['bevelToResMap'].pop(entry)
+
         if res == 0:
             for e in obj.data.edges:
                 if e.select == True:
                      e.bevel_weight = 0
             bpy.ops.object.mode_set(mode='EDIT')
             return {'FINISHED'}
+
         bevelToResMap = obj['bevelToResMap']
         foundRes = False
-        currentSum = 1
         for bevelInt in bevelToResMap:
             if bevelToResMap[bevelInt] == res:  # previously used resolution - reuse!
                 bevel = int(bevelInt)
                 foundRes = True
-            currentSum += 1 #int(bevelInt)
         if not foundRes:
-            bevelToResMap[str(currentSum)] = res  # create a new entry in map
-            bevel = currentSum
+            allEntries = set(range(1,101)) #all possible bevel entries
+            newEntry = min(list(allEntries.difference(existingRes)))
+            bevelToResMap[str(newEntry)] = res  # create a new entry in map
+            bevel = newEntry
         for e in obj.data.edges:
             if e.select == True:
                  e.bevel_weight = bevel/100.
@@ -723,17 +740,32 @@ Cells will be coarser in the edge's z-direction for grading > 1'''
             bpy.ops.object.mode_set(mode='EDIT')
             return {'FINISHED'}
 
+        existingGrad = set()
+        for e in obj.data.edges:
+            if str(round(e.crease*100)) in obj['creaseToGradMap']:
+                existingGrad.add(round(e.crease*100))
+            else:
+                e.crease = 0 #remove bevel if no entry in bevelToResMap was found
+
+        mapEntryToRemove = set()
+        for entry in obj['creaseToGradMap']:
+            if not int(entry) in existingGrad:
+                mapEntryToRemove.add(entry)
+
+        for entry in mapEntryToRemove:
+            obj['creaseToGradMap'].pop(entry)
+
         creaseToGradMap = obj['creaseToGradMap']
         foundGrad = False
-        currentSum = 1
         for creaseInt in creaseToGradMap:
             if creaseToGradMap[creaseInt] == grad:  # previously used grading - reuse!
                 crease = int(creaseInt)
                 foundGrad = True
-            currentSum += 1 # int(creaseInt)
         if not foundGrad:
-            creaseToGradMap[str(currentSum)] = grad  # create a new entry in map
-            crease = currentSum
+            allEntries = set(range(1,101)) #all possible bevel entries
+            newEntry = min(list(allEntries.difference(existingGrad)))
+            creaseToGradMap[str(newEntry)] = grad  # create a new entry in map
+            crease = newEntry
         for e in obj.data.edges:
             if e.select == True:
                  e.crease = crease/100.
