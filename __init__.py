@@ -331,7 +331,7 @@ class UIPanel(bpy.types.Panel):
                 row = layout.row()
 
                 sub = row.row(align=True)
-                sub.operator("object.vertex_group_assign", text="Assign").new = False
+                sub.operator("object.vertex_group_assign", text="Assign")
                 sub.operator("object.vertex_group_remove_from", text="Remove")
                 sub = row.row(align=True)
                 sub.operator("object.vertex_group_select", text="Select")
