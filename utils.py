@@ -55,7 +55,7 @@ def write(filename, edges, vertices_coord, mean_res, convertToMeters, patchnames
     NoCells = 0
     for bid, vl in enumerate(block_print_out):
         blockName = ''
-        for name in vertexNames:
+        for name in reversed(vertexNames):
             if all( v in name[1] for v in vl ):
                 blockName = name[0]
         for es, edgeSet in enumerate(dependent_edges):
